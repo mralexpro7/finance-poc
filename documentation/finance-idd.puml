@@ -9,6 +9,7 @@
 !include <awslib/Containers/ElasticContainerService>
 !include <awslib/Database/AuroraPostgreSQLInstance>
 !include <awslib/General/Disk>
+!include <awslib/General/Internet>
 
 title finance-poc - Infrastructure (local dev)
 left to right direction
@@ -19,7 +20,7 @@ rectangle "Developer workstation (macOS)" {
   Client(browser, "Browser", "React 19 SPA")
 
   rectangle "Node 26 process  :APP_PORT (3000)" {
-    EC2Instance(express, "Express 5 server", "server/index.js\n/api/* routes")
+    EC2Instance(express, "Express 5 server", "server/index.js\n/api/health, /api/positions (CRUD),\n/api/position-categories, /api/tickers,\n/api/positions/:id/transactions, /api/transactions/:id\nruns migrations + ticker sync on start")
     EC2Instance(vite, "Vite 8 middleware", "dev: HMR + JSX transform\nprod: static dist/")
   }
 
@@ -30,10 +31,13 @@ rectangle "Developer workstation (macOS)" {
   }
 }
 
+Internet(twelvedata, "Twelve Data API", "api.twelvedata.com\n/stocks, /etfs (reference)\n/price (market value)")
+
 dev --> browser
 browser --> express : HTTP /api/*
-browser --> vite : HTTP / (SPA assets, HMR ws)
-express --> db : pg Pool (DATABASE_URL)
+browser --> vite : HTTP / (SPA assets)\nHMR websocket on same port
+express --> db : pg Pool (DATABASE_URL)\nSQL + db/migrations
 container --> db : hosts
 db --> vol : persists
+express --> twelvedata : HTTPS, Authorization: apikey\n(TWELVE_DATA_API_KEY, server-side only)\nprices cached in memory PRICE_CACHE_SECONDS
 @enduml

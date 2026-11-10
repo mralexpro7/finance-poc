@@ -8,6 +8,7 @@ participant "Browser\n(React SPA)" as UI
 participant "Express\nserver/index.js" as API
 participant "Vite\nmiddleware" as Vite
 database "finance-db\n(finance-schema)" as DB
+participant "Twelve Data\nAPI" as TD
 
 == Session start (Claude Code SessionStart hook -> scripts/dev-up.sh) ==
 note over API, DB
@@ -15,20 +16,123 @@ note over API, DB
   start `npm run dev` if APP_PORT is free
 end note
 
+== Server start ==
+API -> DB : pg_advisory_lock; read schema_migrations
+loop each pending db/migrations/*.sql
+  API -> DB : BEGIN; run file; record name; COMMIT
+end
+note right of API : DB unreachable -> log and keep serving
+
+== Ticker catalog sync (start-up if empty or > TICKER_CATALOG_TTL_HOURS; npm run tickers:sync; POST /api/tickers/sync) ==
+API -> TD : GET /stocks?country=..., GET /etfs?country=... (apikey header)
+TD --> API : listings
+API -> API : uppercase, dedupe by symbol\n(stock > ETF; NYSE > NASDAQ > CBOE > IEX > OTC)
+API -> DB : BEGIN; DELETE ticker_catalog; INSERT unnest(...); COMMIT
+
 == Load application ==
 User -> UI : open http://localhost:3000
 UI -> API : GET /
 API -> Vite : not an /api route
 Vite --> UI : index.html + transformed /src modules (HMR)
-
-== System status check ==
 UI -> API : GET /api/health
-API -> DB : SELECT current_database(), current_schema(), version()
-alt database reachable
-  DB --> API : row
-  API --> UI : 200 {status:"ok", db}
-else database down
-  API --> UI : 503 {status:"degraded", db.error}
+API -> DB : SELECT current_database(), current_schema()
+API --> UI : 200 ok | 503 degraded
+UI --> User : sidebar (Home | Positions) + DB status dot
+
+== Navigate: Home (#/home) ==
+User -> UI : click Home
+UI --> User : empty view
+
+== Navigate: Positions (#/positions) ==
+User -> UI : click Positions
+UI -> API : GET /api/positions + GET /api/position-categories
+API -> DB : position JOIN position_category ORDER BY sort_order, name
+DB --> API : rows
+API --> UI : 200 [{id, name, ticker, category_id, category_code, category_name}]
+UI --> User : table: Name | Ticker | Category badge | Edit/Delete
+
+== Add position ==
+User -> UI : "+ Add position", choose Category (default Investments)
+alt ticker_policy = catalog (Investments)
+  UI --> User : Ticker drop-down (optional)
+else free (Crypto)
+  UI --> User : Ticker text field (required)
+else none (Cash)
+  UI --> User : no Ticker field
 end
-UI --> User : render status
+User -> UI : (Investments) type in Ticker (symbol or company)
+loop each keystroke (200 ms debounce)
+  UI -> API : GET /api/tickers?q=...
+  API -> DB : rank: exact symbol > symbol prefix > name prefix > non-OTC > common stock
+  API --> UI : [{symbol, name, exchange, type, in_positions}]
+end
+User -> UI : pick option (click / arrows + Enter)
+UI --> User : ticker set; Name auto-filled (if empty or still auto-filled)
+User -> UI : Save
+UI -> API : POST /api/positions {name, ticker, category_id}
+API -> DB : load category.ticker_policy
+API -> API : trim; ticker -> UPPERCASE; apply policy\n(none: ticker = NULL; free: required; catalog: optional)
+API -> DB : catalog policy + ticker given: in ticker_catalog? (skipped if catalog empty)
+alt invalid / unknown ticker
+  API --> UI : 400 {fields}
+else valid
+  API -> DB : INSERT ... RETURNING
+  alt ticker exists (23505)
+    API --> UI : 409 {fields.ticker}
+  else
+    API --> UI : 201 {id, name, ticker}
+    UI --> User : row added (highlighted)
+  end
+end
+
+== Edit position ==
+User -> UI : Edit (row), change fields, Save changes
+UI -> API : PUT /api/positions/:id {name, ticker, category_id}
+API -> DB : UPDATE ... WHERE id RETURNING
+API --> UI : 200 | 400 | 404 | 409 (same rules as add;\ncatalog check skipped only if ticker AND category unchanged)
+UI --> User : row updated (highlighted)
+
+== Transactions (right-hand panel of the Edit form) ==
+UI -> API : GET /api/positions/:id/transactions
+API -> DB : position ticker + category
+alt has ticker and not cash (crypto -> "<TICKER>/USD")
+  alt price cached < PRICE_CACHE_SECONDS
+    API -> API : use cached price
+  else
+    API -> TD : GET /price?symbol=...
+    alt ok
+      TD --> API : {price}
+    else error / rate limit (8 req/min)
+      API -> API : last known price, stale = true (or error)
+    end
+  end
+else no ticker / cash
+  API -> API : market = {symbol: null}
+end
+API -> DB : SELECT ..., quantity * price AS market_value + SUM summary
+API --> UI : {transactions[], summary{count, quantity, cost, avg_price, market_value}, market{symbol, price, as_of, stale}}
+UI --> User : Date & time | Price | Quantity | Total | Market value\n(green >= cost, red < cost) + totals row + market price line
+alt + Add transaction / Edit (row)
+  User -> UI : purchased at (local date-time), price per unit, quantity
+  UI -> API : POST /api/positions/:id/transactions | PUT /api/transactions/:id\n{executed_at (ISO, UTC), price, quantity}
+  API -> API : validate: date set and not in future;\nprice, quantity > 0 (exact decimals)
+  API -> DB : INSERT | UPDATE ... RETURNING
+  API --> UI : 201 | 200 {transaction, summary, market} (400 {fields} if invalid)\n(UI reloads list if market price changed)
+else Delete (row)
+  UI --> User : confirmation dialog
+  UI -> API : DELETE /api/transactions/:id
+  API --> UI : 200 {summary, market}
+end
+
+== Delete position ==
+User -> UI : Delete (row)
+UI --> User : confirmation dialog "Delete position?"\n(mentions transaction_count; transactions cascade)
+alt Cancel / Esc
+  UI --> User : dialog closed, nothing changed
+else Delete
+  UI -> API : DELETE /api/positions/:id
+  API -> DB : DELETE ... WHERE id
+  API --> UI : 204 (404 if already gone)
+  UI --> User : row removed
+end
 @enduml

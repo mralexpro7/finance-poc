@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# Stops the web server; pass --db to also stop the Postgres container (data volume is kept).
+# Stops the web server (npm -> node --watch -> server, whole tree); --db also stops Postgres (volume kept).
 cd "$(dirname "$0")/.."
 set -a; source .env; set +a
-pids=$(lsof -tiTCP:"$APP_PORT" -sTCP:LISTEN 2>/dev/null)
-[ -n "$pids" ] && kill $pids && echo "[dev-down] web stopped" || echo "[dev-down] web was not running"
+
+kill_tree() { local c; for c in $(pgrep -P "$1"); do kill_tree "$c"; done; kill "$1" 2>/dev/null; }
+
+stopped=0
+if [ -f logs/dev.pid ] && kill -0 "$(cat logs/dev.pid)" 2>/dev/null; then
+  kill_tree "$(cat logs/dev.pid)"; stopped=1
+fi
 rm -f logs/dev.pid
-[ "${1:-}" = "--db" ] && docker compose stop postgres
+# Fallback for anything not started via dev-up.sh that still holds the port.
+pids=$(lsof -tiTCP:"$APP_PORT" -sTCP:LISTEN 2>/dev/null)
+[ -n "$pids" ] && { kill $pids; stopped=1; }
+[ "$stopped" = 1 ] && echo "[dev-down] web stopped" || echo "[dev-down] web was not running"
+
+if [ "${1:-}" = "--db" ]; then docker compose stop postgres; fi
+exit 0

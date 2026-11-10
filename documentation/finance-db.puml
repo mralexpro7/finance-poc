@@ -9,17 +9,65 @@ skinparam linetype ortho
 title finance-db - Data Model (schema "finance-schema")
 
 package "finance-schema" {
-  note as empty
-    No application tables yet.
-    Add each entity as:
-      entity "table_name" as t {
-        * id : bigint <<PK>>
-        --
-        * col : type
-        fk_id : bigint <<FK>>
-      }
-    and relations with IE cardinality, e.g.
-      parent ||--o{ child
+  entity "position" as position {
+    * id : bigint <<PK, identity>>
+    --
+    * name : text
+    ticker : varchar(16) <<UK, uppercase, NULL for cash>>
+    * category_id : smallint <<FK>>
+    * created_at : timestamptz
+  }
+
+  entity "position_category" as position_category {
+    * id : smallint <<PK, identity>>
+    --
+    * code : varchar(32) <<UK>>
+    * name : text <<UK>>
+    description : text
+    * ticker_policy : varchar(16) <<catalog | free | none>>
+    * sort_order : smallint
+  }
+  note right of position_category
+    investment -> catalog (optional, must be in ticker_catalog)
+    crypto     -> free (required)
+    cash       -> none (stored NULL)
   end note
+
+  position_category ||--o{ position : categorizes\n(ON DELETE RESTRICT)
+
+  entity "position_transaction" as position_transaction {
+    * id : bigint <<PK, identity>>
+    --
+    * position_id : bigint <<FK>>
+    * executed_at : timestamptz
+    * price : numeric(20,8) <<CHECK positive>>
+    * quantity : numeric(28,10) <<CHECK positive>>
+    * created_at : timestamptz
+    * updated_at : timestamptz
+  }
+
+  position ||--o{ position_transaction : purchased in\n(ON DELETE CASCADE)
+
+  entity "ticker_catalog" as ticker_catalog {
+    * symbol : varchar(16) <<PK>>
+    --
+    * name : text <<trgm index>>
+    exchange : text
+    mic_code : text
+    type : text
+    currency : text
+    country : text
+    * synced_at : timestamptz
+  }
+  note right of ticker_catalog : Twelve Data reference list\n(US stocks + ETFs), fully\nreplaced on each sync.
+
+  ticker_catalog |o..o| position : symbol = ticker\n(logical, no FK)
+
+  entity "schema_migrations" as schema_migrations {
+    * name : text <<PK>>
+    --
+    * applied_at : timestamptz
+  }
+  note bottom of schema_migrations : Bookkeeping for server/migrate.js;\nnot part of the domain model.
 }
 @enduml

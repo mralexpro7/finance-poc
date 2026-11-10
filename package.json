@@ -7,11 +7,13 @@
     "node": ">=26"
   },
   "scripts": {
-    "dev": "node --watch-path=server server/index.js",
+    "dev": "node --watch-path=server --watch-path=db/migrations server/index.js",
     "build": "vite build",
     "start": "NODE_ENV=production node server/index.js",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
+    "db:migrate": "node server/migrate.js",
+    "tickers:sync": "node server/tickers.js",
     "db:psql": "docker compose exec postgres sh -c 'psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"'",
     "up": "scripts/dev-up.sh",
     "down": "scripts/dev-down.sh"

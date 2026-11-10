@@ -15,6 +15,12 @@ docker compose up -d --wait postgres >logs/docker.log 2>&1 \
   && echo "[dev-up] postgres: running ($POSTGRES_CONTAINER on :$POSTGRES_PORT)" \
   || echo "[dev-up] postgres: FAILED - see logs/docker.log"
 
+# A watcher whose server child crashed leaves the port free but the process alive; restart it cleanly.
+if [ -f logs/dev.pid ] && kill -0 "$(cat logs/dev.pid)" 2>/dev/null \
+   && ! lsof -iTCP:"$APP_PORT" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+  scripts/dev-down.sh >/dev/null
+fi
+
 if lsof -iTCP:"$APP_PORT" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
   echo "[dev-up] web: already running at http://$APP_HOST:$APP_PORT"
 else

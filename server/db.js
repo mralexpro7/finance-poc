@@ -1,3 +1,4 @@
+import 'dotenv/config'; // load .env before the pool reads DATABASE_URL (also covers CLI entry points)
 import pg from 'pg';
 
 // search_path is set to "finance-schema" on the DB role (db/init/01-schema.sql),

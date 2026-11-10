@@ -1,0 +1,39 @@
+@startuml finance-idd
+' Infrastructure Design Document - finance-poc (local development)
+' Icons: PlantUML Standard Library, awslib
+!include <awslib/AWSCommon>
+!include <awslib/AWSSimplified>
+!include <awslib/General/User>
+!include <awslib/General/Client>
+!include <awslib/Compute/EC2Instance>
+!include <awslib/Containers/ElasticContainerService>
+!include <awslib/Database/AuroraPostgreSQLInstance>
+!include <awslib/General/Disk>
+
+title finance-poc - Infrastructure (local dev)
+left to right direction
+
+User(dev, "Developer", "browser")
+
+rectangle "Developer workstation (macOS)" {
+  Client(browser, "Browser", "React 19 SPA")
+
+  rectangle "Node 26 process  :APP_PORT (3000)" {
+    EC2Instance(express, "Express 5 server", "server/index.js\n/api/* routes")
+    EC2Instance(vite, "Vite 8 middleware", "dev: HMR + JSX transform\nprod: static dist/")
+  }
+
+  rectangle "Docker" {
+    ElasticContainerService(container, "finance-postgres", "postgres:18-alpine")
+    AuroraPostgreSQLInstance(db, "finance-db", "schema: finance-schema\n:POSTGRES_PORT (5432)")
+    Disk(vol, "finance-pgdata", "named volume")
+  }
+}
+
+dev --> browser
+browser --> express : HTTP /api/*
+browser --> vite : HTTP / (SPA assets, HMR ws)
+express --> db : pg Pool (DATABASE_URL)
+container --> db : hosts
+db --> vol : persists
+@enduml

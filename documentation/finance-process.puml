@@ -1,0 +1,34 @@
+@startuml finance-process
+' Application processes - sequence diagrams
+autonumber
+title finance-poc - Processes
+
+actor User
+participant "Browser\n(React SPA)" as UI
+participant "Express\nserver/index.js" as API
+participant "Vite\nmiddleware" as Vite
+database "finance-db\n(finance-schema)" as DB
+
+== Session start (Claude Code SessionStart hook -> scripts/dev-up.sh) ==
+note over API, DB
+  docker compose up -d --wait postgres
+  start `npm run dev` if APP_PORT is free
+end note
+
+== Load application ==
+User -> UI : open http://localhost:3000
+UI -> API : GET /
+API -> Vite : not an /api route
+Vite --> UI : index.html + transformed /src modules (HMR)
+
+== System status check ==
+UI -> API : GET /api/health
+API -> DB : SELECT current_database(), current_schema(), version()
+alt database reachable
+  DB --> API : row
+  API --> UI : 200 {status:"ok", db}
+else database down
+  API --> UI : 503 {status:"degraded", db.error}
+end
+UI --> User : render status
+@enduml

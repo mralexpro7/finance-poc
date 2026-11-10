@@ -1,0 +1,25 @@
+@startuml finance-db
+' Data Model - Information Engineering (crow's foot) notation
+' Database: finance-db   Schema: finance-schema
+' Relation syntax:  |o--o{  zero-or-one to zero-or-many
+'                   ||--|{  exactly-one to one-or-many
+hide circle
+skinparam linetype ortho
+
+title finance-db - Data Model (schema "finance-schema")
+
+package "finance-schema" {
+  note as empty
+    No application tables yet.
+    Add each entity as:
+      entity "table_name" as t {
+        * id : bigint <<PK>>
+        --
+        * col : type
+        fk_id : bigint <<FK>>
+      }
+    and relations with IE cardinality, e.g.
+      parent ||--o{ child
+  end note
+}
+@enduml
